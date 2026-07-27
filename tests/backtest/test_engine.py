@@ -17,17 +17,20 @@ from aarta.domain.models import (
     OrderIntent,
     OrderSide,
     OrderType,
+    TimeInForce,
 )
 
 
 class DummyStrategy:
     """A simple strategy for testing."""
 
-    def __init__(self, buy_at_index: int | None = None, sell_at_index: int | None = None) -> None:
+    def __init__(
+        self, buy_at_index: int | None = None, sell_at_index: int | None = None
+    ) -> None:
         self.buy_at_index = buy_at_index
         self.sell_at_index = sell_at_index
         self.fills_received: list = []
-        self.position = Decimal("0")
+        self.position = Decimal(0)
 
     def on_bar(self, bar: Bar, bar_index: int) -> list[OrderIntent]:
         """Generate order intents based on bar index."""
@@ -95,10 +98,10 @@ def _create_test_bars() -> list[Bar]:
 
     for i in range(10):
         # Create bars with increasing prices
-        open_price = Decimal("100") + Decimal(i)
-        high_price = open_price + Decimal("2")
-        low_price = open_price - Decimal("1")
-        close_price = open_price + Decimal("1")
+        open_price = Decimal(100) + Decimal(i)
+        high_price = open_price + Decimal(2)
+        low_price = open_price - Decimal(1)
+        close_price = open_price + Decimal(1)
 
         bar = Bar(
             instrument_id="TEST",
@@ -155,14 +158,14 @@ class TestExecutionConfig:
     def test_default_config(self) -> None:
         """Test default configuration values."""
         config = ExecutionConfig()
-        assert config.default_slippage_bps == Decimal("5")
-        assert config.market_order_slippage_bps == Decimal("2")
+        assert config.default_slippage_bps == Decimal(5)
+        assert config.market_order_slippage_bps == Decimal(2)
         assert config.max_liquidity_ratio == Decimal("0.10")
 
     def test_negative_slippage_rejected(self) -> None:
         """Test that negative slippage is rejected."""
         with pytest.raises(ValueError, match="negative"):
-            ExecutionConfig(default_slippage_bps=Decimal("-1"))
+            ExecutionConfig(default_slippage_bps=Decimal(-1))
 
     def test_invalid_fill_probability_rejected(self) -> None:
         """Test that invalid fill probability is rejected."""
@@ -201,11 +204,11 @@ class TestBacktestEngine:
             instrument=instrument,
             bars=bars,
             strategy=strategy,
-            initial_cash=Decimal("1000000"),
+            initial_cash=Decimal(1000000),
         )
 
-        assert engine.initial_cash == Decimal("1000000")
-        assert engine.portfolio.cash == Decimal("1000000")
+        assert engine.initial_cash == Decimal(1000000)
+        assert engine.portfolio.cash == Decimal(1000000)
         assert len(engine.bars) == 10
 
     def test_run_no_trades(self) -> None:
@@ -225,7 +228,7 @@ class TestBacktestEngine:
         assert results["funnel_stats"]["bars_processed"] == 10
         assert results["funnel_stats"]["trades_opened"] == 0
         assert results["funnel_stats"]["trades_closed"] == 0
-        assert results["final_equity"] == str(Decimal("1000000"))
+        assert results["final_equity"] == str(Decimal(1000000))
 
     def test_run_with_buy_signal(self) -> None:
         """Test running backtest with a buy signal."""
@@ -237,7 +240,7 @@ class TestBacktestEngine:
             instrument=instrument,
             bars=bars,
             strategy=strategy,
-            initial_cash=Decimal("1000000"),
+            initial_cash=Decimal(1000000),
         )
 
         results = engine.run()
@@ -257,7 +260,7 @@ class TestBacktestEngine:
             instrument=instrument,
             bars=bars,
             strategy=strategy,
-            initial_cash=Decimal("1000000"),
+            initial_cash=Decimal(1000000),
         )
 
         results = engine.run()
@@ -294,13 +297,13 @@ class TestBacktestEngine:
             instrument=instrument,
             bars=bars,
             strategy=strategy,
-            initial_cash=Decimal("1000000"),
+            initial_cash=Decimal(1000000),
         )
 
         engine.run()
 
         # After buying, cash should decrease and position should exist
-        assert engine.portfolio.cash < Decimal("1000000")
+        assert engine.portfolio.cash < Decimal(1000000)
         assert "TEST" in engine.portfolio.positions
         assert engine.portfolio.positions["TEST"] > 0
 
@@ -364,7 +367,7 @@ class TestBacktestEngine:
             instrument=instrument,
             bars=bars,
             strategy=strategy,
-            initial_cash=Decimal("100"),  # Not enough to buy 10 shares at ~100
+            initial_cash=Decimal(100),  # Not enough to buy 10 shares at ~100
         )
 
         results = engine.run()
@@ -386,7 +389,7 @@ class TestBacktestEngine:
                             instrument_id="TEST",
                             side=OrderSide.BUY,
                             order_type=OrderType.MARKET,
-                            quantity=Decimal("0"),  # Invalid
+                            quantity=Decimal(0),  # Invalid
                             limit_price=None,
                         )
                     ]

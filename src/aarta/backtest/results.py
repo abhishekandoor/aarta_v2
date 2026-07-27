@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +45,9 @@ class BacktestResultManifest:
             "end_time": self.end_time,
         }
         config_json = json.dumps(config_data, sort_keys=True, separators=(",", ":"))
-        object.__setattr__(self, "config_hash", hashlib.sha256(config_json.encode()).hexdigest())
+        object.__setattr__(
+            self, "config_hash", hashlib.sha256(config_json.encode()).hexdigest()
+        )
 
         # Compute result hash
         result_data = {
@@ -58,7 +59,9 @@ class BacktestResultManifest:
             "num_trades": self.num_trades,
         }
         result_json = json.dumps(result_data, sort_keys=True, separators=(",", ":"))
-        object.__setattr__(self, "result_hash", hashlib.sha256(result_json.encode()).hexdigest())
+        object.__setattr__(
+            self, "result_hash", hashlib.sha256(result_json.encode()).hexdigest()
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""

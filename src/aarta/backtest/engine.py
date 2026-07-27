@@ -20,8 +20,6 @@ from aarta.domain.models import (
     OrderSide,
     OrderStatus,
     OrderType,
-    RiskDecision,
-    RiskDecisionResult,
     TimeInForce,
 )
 
@@ -70,16 +68,19 @@ class StrategyProtocol(Protocol):
 class ExecutionConfig:
     """Configuration for order execution simulation."""
 
-    default_slippage_bps: Decimal = Decimal("5")  # 5 basis points
+    default_slippage_bps: Decimal = Decimal(5)  # 5 basis points
     limit_order_fill_probability: Decimal = Decimal("0.8")
-    market_order_slippage_bps: Decimal = Decimal("2")
+    market_order_slippage_bps: Decimal = Decimal(2)
     min_liquidity_ratio: Decimal = Decimal("0.01")  # 1% of bar volume
     max_liquidity_ratio: Decimal = Decimal("0.10")  # 10% of bar volume
 
     def __post_init__(self) -> None:
         if self.default_slippage_bps < 0:
             raise ValueError("Slippage cannot be negative")
-        if self.limit_order_fill_probability < 0 or self.limit_order_fill_probability > 1:
+        if (
+            self.limit_order_fill_probability < 0
+            or self.limit_order_fill_probability > 1
+        ):
             raise ValueError("Fill probability must be between 0 and 1")
 
 
@@ -142,7 +143,7 @@ class PortfolioState:
     def drawdown(self) -> Decimal:
         """Current drawdown from peak."""
         if self.peak_equity == 0:
-            return Decimal("0")
+            return Decimal(0)
         return (self.peak_equity - self.equity) / self.peak_equity
 
 
@@ -155,7 +156,7 @@ class BacktestEngine:
         bars: list[Bar],
         strategy: StrategyProtocol,
         config: ExecutionConfig | None = None,
-        initial_cash: Decimal = Decimal("1000000"),
+        initial_cash: Decimal = Decimal(1000000),
     ) -> None:
         self.instrument = instrument
         self.bars = bars
@@ -168,15 +169,15 @@ class BacktestEngine:
             cash=initial_cash,
             positions={},
             position_cost_basis={},
-            realized_pnl=Decimal("0"),
-            unrealized_pnl=Decimal("0"),
-            gross_exposure=Decimal("0"),
-            net_exposure=Decimal("0"),
+            realized_pnl=Decimal(0),
+            unrealized_pnl=Decimal(0),
+            gross_exposure=Decimal(0),
+            net_exposure=Decimal(0),
             peak_equity=initial_cash,
             trough_equity=initial_cash,
-            max_drawdown=Decimal("0"),
-            total_fees=Decimal("0"),
-            total_slippage=Decimal("0"),
+            max_drawdown=Decimal(0),
+            total_fees=Decimal(0),
+            total_slippage=Decimal(0),
         )
 
         self._open_orders: dict[str, Order] = {}
@@ -224,12 +225,14 @@ class BacktestEngine:
             return
 
         # Calculate unrealized P&L
-        unrealized_pnl = Decimal("0")
-        gross_exposure = Decimal("0")
+        unrealized_pnl = Decimal(0)
+        gross_exposure = Decimal(0)
 
         for instrument_id, quantity in self._portfolio.positions.items():
             if quantity != 0:
-                cost_basis = self._portfolio.position_cost_basis.get(instrument_id, Decimal("0"))
+                cost_basis = self._portfolio.position_cost_basis.get(
+                    instrument_id, Decimal(0)
+                )
                 current_value = quantity * self._current_bar.close
                 position_pnl = current_value - (quantity * cost_basis)
                 unrealized_pnl += position_pnl
@@ -248,9 +251,10 @@ class BacktestEngine:
 
         # Update max drawdown
         if self._portfolio.peak_equity > 0:
-            current_dd = (self._portfolio.peak_equity - equity) / self._portfolio.peak_equity
-            if current_dd > self._portfolio.max_drawdown:
-                self._portfolio.max_drawdown = current_dd
+            current_dd = (
+                self._portfolio.peak_equity - equity
+            ) / self._portfolio.peak_equity
+            self._portfolio.max_drawdown = max(self._portfolio.max_drawdown, current_dd)
 
     def _simulate_market_order_fill(
         self,
@@ -258,19 +262,24 @@ class BacktestEngine:
         bar: Bar,
     ) -> Fill | None:
         """Simulate market order fill with slippage."""
+        # Access order details through intent
+        side = order.intent.side
+        quantity = order.intent.quantity
+        instrument_id = order.intent.instrument_id
+
         # Determine fill price with slippage
-        if order.side == OrderSide.BUY:
+        if side == OrderSide.BUY:
             # Buy at ask (high + slippage)
-            slippage = bar.high * self.config.market_order_slippage_bps / Decimal("10000")
+            slippage = bar.high * self.config.market_order_slippage_bps / Decimal(10000)
             fill_price = bar.high + slippage
         else:
             # Sell at bid (low - slippage)
-            slippage = bar.low * self.config.market_order_slippage_bps / Decimal("10000")
+            slippage = bar.low * self.config.market_order_slippage_bps / Decimal(10000)
             fill_price = bar.low - slippage
 
         # Check liquidity constraints
         max_qty = bar.volume * self.config.max_liquidity_ratio
-        fill_qty = min(order.quantity, max_qty)
+        fill_qty = min(quantity, max_qty)
 
         if fill_qty <= 0:
             return None
@@ -282,8 +291,8 @@ class BacktestEngine:
         fill = Fill(
             fill_id=f"fill_{order.order_id}_{len(self._fills)}",
             order_id=order.order_id,
-            instrument_id=order.instrument_id,
-            side=order.side,
+            instrument_id=instrument_id,
+            side=side,
             quantity=fill_qty,
             price=fill_price,
             fee=fee,
@@ -298,36 +307,44 @@ class BacktestEngine:
         bar: Bar,
     ) -> Fill | None:
         """Simulate limit order fill based on price crossing."""
+        # Access order details through intent
+        side = order.intent.side
+        quantity = order.intent.quantity
+        instrument_id = order.intent.instrument_id
+        limit_price = order.intent.limit_price
+
         # Check if limit price was crossed
         filled = False
-        fill_price = order.limit_price
+        fill_price = limit_price
 
-        if order.side == OrderSide.BUY:
+        if side == OrderSide.BUY:
             # Buy limit fills if low <= limit_price
-            if bar.low <= order.limit_price:
+            if bar.low <= limit_price:
                 filled = True
                 # Better fill: use min(limit_price, open) if gap down
-                fill_price = min(order.limit_price, bar.open)
+                fill_price = min(limit_price, bar.open)
         else:
             # Sell limit fills if high >= limit_price
-            if bar.high >= order.limit_price:
+            if bar.high >= limit_price:
                 filled = True
                 # Better fill: use max(limit_price, open) if gap up
-                fill_price = max(order.limit_price, bar.open)
+                fill_price = max(limit_price, bar.open)
 
         if not filled:
             return None
 
         # Apply slippage improvement (limit orders can get better fills)
-        slippage_improvement = fill_price * self.config.default_slippage_bps / Decimal("10000")
-        if order.side == OrderSide.BUY:
+        slippage_improvement = (
+            fill_price * self.config.default_slippage_bps / Decimal(10000)
+        )
+        if side == OrderSide.BUY:
             fill_price = fill_price - slippage_improvement / 2
         else:
             fill_price = fill_price + slippage_improvement / 2
 
         # Check liquidity
         max_qty = bar.volume * self.config.max_liquidity_ratio
-        fill_qty = min(order.quantity, max_qty)
+        fill_qty = min(quantity, max_qty)
 
         if fill_qty <= 0:
             return None
@@ -339,8 +356,8 @@ class BacktestEngine:
         fill = Fill(
             fill_id=f"fill_{order.order_id}_{len(self._fills)}",
             order_id=order.order_id,
-            instrument_id=order.instrument_id,
-            side=order.side,
+            instrument_id=instrument_id,
+            side=side,
             quantity=fill_qty,
             price=fill_price,
             fee=fee,
@@ -353,7 +370,10 @@ class BacktestEngine:
         """Process a fill and update portfolio."""
         self._fills.append(fill)
         self._funnel = TradeFunnelStats(
-            **{**self._funnel.to_dict(), "orders_filled": self._funnel.orders_filled + 1},
+            **{
+                **self._funnel.to_dict(),
+                "orders_filled": self._funnel.orders_filled + 1,
+            },
         )
 
         # Update cash and positions
@@ -362,13 +382,17 @@ class BacktestEngine:
         if fill.side == OrderSide.BUY:
             # Buying: reduce cash, increase position
             self._portfolio.cash -= notional + fill.fee
-            current_qty = self._portfolio.positions.get(fill.instrument_id, Decimal("0"))
-            current_cost = self._portfolio.position_cost_basis.get(fill.instrument_id, Decimal("0"))
+            current_qty = self._portfolio.positions.get(fill.instrument_id, Decimal(0))
+            current_cost = self._portfolio.position_cost_basis.get(
+                fill.instrument_id, Decimal(0)
+            )
 
             # Update weighted average cost basis
             total_qty = current_qty + fill.quantity
             if total_qty > 0:
-                new_cost_basis = (current_qty * current_cost + fill.quantity * fill.price) / total_qty
+                new_cost_basis = (
+                    current_qty * current_cost + fill.quantity * fill.price
+                ) / total_qty
                 self._portfolio.position_cost_basis[fill.instrument_id] = new_cost_basis
 
             self._portfolio.positions[fill.instrument_id] = total_qty
@@ -376,16 +400,24 @@ class BacktestEngine:
             # Track if this opened a new trade
             if current_qty == 0:
                 self._funnel = TradeFunnelStats(
-                    **{**self._funnel.to_dict(), "trades_opened": self._funnel.trades_opened + 1},
+                    **{
+                        **self._funnel.to_dict(),
+                        "trades_opened": self._funnel.trades_opened + 1,
+                    },
                 )
-                self._emit_event(EventType.TRADE_OPENED, {"side": "BUY", "quantity": str(fill.quantity)})
+                self._emit_event(
+                    EventType.TRADE_OPENED,
+                    {"side": "BUY", "quantity": str(fill.quantity)},
+                )
 
         else:  # SELL
             # Selling: increase cash, reduce position
-            current_qty = self._portfolio.positions.get(fill.instrument_id, Decimal("0"))
+            current_qty = self._portfolio.positions.get(fill.instrument_id, Decimal(0))
 
             # Calculate realized P&L using FIFO cost basis
-            cost_basis = self._portfolio.position_cost_basis.get(fill.instrument_id, Decimal("0"))
+            cost_basis = self._portfolio.position_cost_basis.get(
+                fill.instrument_id, Decimal(0)
+            )
             realized = fill.quantity * (fill.price - cost_basis)
             self._portfolio.realized_pnl += realized
 
@@ -399,9 +431,15 @@ class BacktestEngine:
             # Track if this closed a trade
             if new_qty == 0:
                 self._funnel = TradeFunnelStats(
-                    **{**self._funnel.to_dict(), "trades_closed": self._funnel.trades_closed + 1},
+                    **{
+                        **self._funnel.to_dict(),
+                        "trades_closed": self._funnel.trades_closed + 1,
+                    },
                 )
-                self._emit_event(EventType.TRADE_CLOSED, {"side": "SELL", "quantity": str(fill.quantity)})
+                self._emit_event(
+                    EventType.TRADE_CLOSED,
+                    {"side": "SELL", "quantity": str(fill.quantity)},
+                )
 
         # Update portfolio state
         self._update_portfolio_state()
@@ -418,36 +456,58 @@ class BacktestEngine:
         # Validate intent
         if intent.quantity <= 0:
             self._funnel = TradeFunnelStats(
-                **{**self._funnel.to_dict(), "strategy_rejections": self._funnel.strategy_rejections + 1},
+                **{
+                    **self._funnel.to_dict(),
+                    "strategy_rejections": self._funnel.strategy_rejections + 1,
+                },
             )
             return
 
         # Check cash availability for buys
         if intent.side == OrderSide.BUY:
-            estimated_cost = intent.quantity * self._current_bar.close * Decimal("1.001")  # Include buffer
+            estimated_cost = (
+                intent.quantity * self._current_bar.close * Decimal("1.001")
+            )  # Include buffer
             if estimated_cost > self._portfolio.cash:
                 self._funnel = TradeFunnelStats(
-                    **{**self._funnel.to_dict(), "risk_rejections": self._funnel.risk_rejections + 1},
+                    **{
+                        **self._funnel.to_dict(),
+                        "risk_rejections": self._funnel.risk_rejections + 1,
+                    },
                 )
                 return
 
-        # Create order
-        order = Order(
-            order_id=f"order_{bar_index}_{self._funnel.orders_submitted}",
+        # Create order intent for the Order constructor
+        order_intent = OrderIntent(
+            strategy_id=intent.strategy_id,
             instrument_id=intent.instrument_id,
             side=intent.side,
             order_type=intent.order_type,
             quantity=intent.quantity,
             limit_price=intent.limit_price,
-            time_in_force=TimeInForce.DAY,
+            time_in_force=intent.time_in_force,
+            client_order_id=intent.client_order_id,
+            timestamp=intent.timestamp,
+        )
+
+        # Create order
+        order = Order(
+            order_id=f"order_{bar_index}_{self._funnel.orders_submitted}",
+            intent=order_intent,
             status=OrderStatus.SUBMITTED,
             submitted_at=self._current_bar.timestamp if self._current_bar else "",
         )
 
         self._funnel = TradeFunnelStats(
-            **{**self._funnel.to_dict(), "orders_submitted": self._funnel.orders_submitted + 1},
+            **{
+                **self._funnel.to_dict(),
+                "orders_submitted": self._funnel.orders_submitted + 1,
+            },
         )
-        self._emit_event(EventType.ORDER_SUBMITTED, {"order_id": order.order_id, "side": intent.side.value})
+        self._emit_event(
+            EventType.ORDER_SUBMITTED,
+            {"order_id": order.order_id, "side": intent.side.value},
+        )
 
         # Simulate immediate fill for market orders, or queue for limit orders
         if self._current_bar:
@@ -471,7 +531,10 @@ class BacktestEngine:
             self._current_bar_index = i
             self._current_bar = bar
             self._funnel = TradeFunnelStats(
-                **{**self._funnel.to_dict(), "bars_processed": self._funnel.bars_processed + 1},
+                **{
+                    **self._funnel.to_dict(),
+                    "bars_processed": self._funnel.bars_processed + 1,
+                },
             )
 
             # Emit bar open event
@@ -484,7 +547,10 @@ class BacktestEngine:
                     # DAY orders expire at end of day
                     orders_to_remove.append(order_id)
                     self._funnel = TradeFunnelStats(
-                        **{**self._funnel.to_dict(), "orders_expired": self._funnel.orders_expired + 1},
+                        **{
+                            **self._funnel.to_dict(),
+                            "orders_expired": self._funnel.orders_expired + 1,
+                        },
                     )
                     self._emit_event(EventType.ORDER_EXPIRED, {"order_id": order_id})
                 else:
@@ -503,14 +569,21 @@ class BacktestEngine:
                 intents = self.strategy.on_bar(bar, i)
                 if intents:
                     self._funnel = TradeFunnelStats(
-                        **{**self._funnel.to_dict(), "setups_detected": self._funnel.setups_detected + len(intents)},
+                        **{
+                            **self._funnel.to_dict(),
+                            "setups_detected": self._funnel.setups_detected
+                            + len(intents),
+                        },
                     )
                     for intent in intents:
                         self._process_order_intent(intent, i)
-            except Exception as e:
+            except Exception:
                 # Strategy error - log and continue
                 self._funnel = TradeFunnelStats(
-                    **{**self._funnel.to_dict(), "strategy_rejections": self._funnel.strategy_rejections + 1},
+                    **{
+                        **self._funnel.to_dict(),
+                        "strategy_rejections": self._funnel.strategy_rejections + 1,
+                    },
                 )
 
             # Emit bar close event
@@ -523,7 +596,9 @@ class BacktestEngine:
         return {
             "funnel_stats": self._funnel.to_dict(),
             "final_equity": str(self._portfolio.equity),
-            "total_return": str((self._portfolio.equity - self.initial_cash) / self.initial_cash),
+            "total_return": str(
+                (self._portfolio.equity - self.initial_cash) / self.initial_cash
+            ),
             "max_drawdown": str(self._portfolio.max_drawdown),
             "total_fees": str(self._portfolio.total_fees),
             "total_slippage": str(self._portfolio.total_slippage),
