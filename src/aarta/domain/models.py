@@ -153,7 +153,7 @@ class Instrument:
 # =============================================================================
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=False)
 class Bar:
     """OHLCV bar representing a time period.
 

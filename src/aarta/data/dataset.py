@@ -5,13 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import tempfile
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from aarta.domain.models import Bar
 from aarta.data.storage import ContentAddressedStorage, StorageManifest
+from aarta.domain.models import Bar
 
 
 @dataclass(frozen=True)
@@ -61,7 +61,9 @@ class DatasetManifest:
             }
             canonical = json.dumps(data, sort_keys=True, separators=(",", ":"))
             object.__setattr__(
-                self, "dataset_hash", hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+                self,
+                "dataset_hash",
+                hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
             )
 
     def to_dict(self) -> dict[str, Any]:
@@ -130,7 +132,9 @@ class Dataset:
 
         for content_hash in self.manifest.content_hashes:
             if not self.storage.verify_integrity(content_hash):
-                errors.append(f"Integrity check failed for hash: {content_hash[:16]}...")
+                errors.append(
+                    f"Integrity check failed for hash: {content_hash[:16]}..."
+                )
 
         return len(errors) == 0, errors
 
@@ -163,9 +167,12 @@ class DatasetBuilder:
         """
         self._name = name
         self._description = description
-        self._dataset_id = dataset_id or hashlib.sha256(
-            f"{name}:{datetime.now(timezone.utc).isoformat()}".encode("utf-8")
-        ).hexdigest()[:16]
+        self._dataset_id = (
+            dataset_id
+            or hashlib.sha256(
+                f"{name}:{datetime.now(UTC).isoformat()}".encode()
+            ).hexdigest()[:16]
+        )
         self._bars: list[Bar] = []
         self._content_hashes: set[str] = set()
 
@@ -235,7 +242,7 @@ class DatasetBuilder:
         storage_manifest = storage.get_manifest()
 
         # Create dataset manifest
-        created_at = datetime.now(timezone.utc).isoformat()
+        created_at = datetime.now(UTC).isoformat()
         manifest = DatasetManifest(
             dataset_id=self._dataset_id,
             name=self._name,
@@ -294,10 +301,10 @@ class DatasetBuilder:
                 bar_count=0,
                 instrument_ids=[],
                 content_hashes=[],
-                created_at=datetime.now(timezone.utc).isoformat(),
-                updated_at=datetime.now(timezone.utc).isoformat(),
+                created_at=datetime.now(UTC).isoformat(),
+                updated_at=datetime.now(UTC).isoformat(),
             ),
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
         )
 
         # Write manifest to file atomically
@@ -360,7 +367,10 @@ class DatasetInspector:
         computed_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
         if stored_hash != computed_hash:
-            return False, f"Hash mismatch: stored={stored_hash[:16]}..., computed={computed_hash[:16]}..."
+            return (
+                False,
+                f"Hash mismatch: stored={stored_hash[:16]}..., computed={computed_hash[:16]}...",
+            )
 
         return True, ""
 

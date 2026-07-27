@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from pathlib import Path
-from typing import Iterable
 
 from aarta.domain.models import Bar, Instrument
 
@@ -35,7 +34,7 @@ class IngestionResult:
     invalid_bars: int
     content_hashes: list[str] = field(default_factory=list)
     manifest_hash: str = ""
-    ingested_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    ingested_at: str = ""
 
     def __post_init__(self) -> None:
         if self.bars_ingested < 0:
@@ -46,6 +45,30 @@ class IngestionResult:
             raise ValueError("conflicts_detected must be non-negative")
         if self.invalid_bars < 0:
             raise ValueError("invalid_bars must be non-negative")
+
+        # Compute manifest_hash if not already set
+        if not self.manifest_hash:
+            manifest_data = json.dumps(
+                {
+                    "bars_ingested": self.bars_ingested,
+                    "content_hashes": sorted(self.content_hashes),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            object.__setattr__(
+                self,
+                "manifest_hash",
+                hashlib.sha256(manifest_data.encode("utf-8")).hexdigest(),
+            )
+
+        # Set ingested_at if not already set
+        if not self.ingested_at:
+            object.__setattr__(
+                self,
+                "ingested_at",
+                datetime.now(UTC).isoformat(),
+            )
 
 
 class DataIngestor:
@@ -113,7 +136,9 @@ class DataIngestor:
             IngestionResult with counts and content hashes.
         """
         known_keys = existing_keys if existing_keys is not None else self._ingested_keys
-        known_hashes = existing_hashes if existing_hashes is not None else self._bar_hashes
+        known_hashes = (
+            existing_hashes if existing_hashes is not None else self._bar_hashes
+        )
 
         ingested = 0
         duplicates = 0
@@ -200,16 +225,16 @@ class DataIngestor:
                 return None
             ts = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
             if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
+                ts = ts.replace(tzinfo=UTC)
 
             return Bar(
-                instrument_id=instrument.id,
+                instrument_id=instrument.symbol,
                 timestamp=ts.isoformat(),
                 open=Decimal(row[open_column]),
                 high=Decimal(row[high_column]),
                 low=Decimal(row[low_column]),
                 close=Decimal(row[close_column]),
-                volume=Decimal(row.get(volume_column, "0")),
+                volume=int(row.get(volume_column, "0")),
             )
         except (KeyError, ValueError, TypeError):
             return None

@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 import tempfile
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from aarta.domain.models import Bar
 
@@ -52,7 +50,9 @@ class StorageManifest:
             }
             canonical = json.dumps(data, sort_keys=True, separators=(",", ":"))
             object.__setattr__(
-                self, "manifest_hash", hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+                self,
+                "manifest_hash",
+                hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
             )
 
 
@@ -95,14 +95,17 @@ class ContentAddressedStorage:
         self._root = Path(root_path)
         self._bars_dir = self._root / "bars"
         self._manifest_path = self._root / "manifest.json"
-        self._storage_id = storage_id or hashlib.sha256(
-            str(datetime.now(timezone.utc).isoformat()).encode("utf-8")
-        ).hexdigest()[:16]
+        self._storage_id = (
+            storage_id
+            or hashlib.sha256(
+                str(datetime.now(UTC).isoformat()).encode("utf-8")
+            ).hexdigest()[:16]
+        )
 
         # Internal state (mutable for building, but exposed immutably)
         self._bars: dict[str, StoredBar] = {}  # hash -> StoredBar
         self._instrument_bars: dict[str, list[str]] = {}  # instrument_id -> [hashes]
-        self._created_at = datetime.now(timezone.utc).isoformat()
+        self._created_at = datetime.now(UTC).isoformat()
         self._updated_at = self._created_at
 
     @property
@@ -197,7 +200,7 @@ class ContentAddressedStorage:
                 pass
             raise
 
-        stored_at = datetime.now(timezone.utc).isoformat()
+        stored_at = datetime.now(UTC).isoformat()
         stored_bar = StoredBar(
             bar=bar,
             content_hash=content_hash,

@@ -1,24 +1,24 @@
 """Tests for historical data ingestion, validation, storage, and datasets."""
 
-import json
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+from aarta.data.dataset import (
+    DatasetBuilder,
+    DatasetInspector,
+    DatasetManifest,
+)
 from aarta.data.ingestion import DataIngestor, IngestionResult
+from aarta.data.storage import ContentAddressedStorage
 from aarta.data.validation import (
     BarValidator,
-    ValidationError,
     ValidationErrorType,
-    ValidationResult,
 )
-from aarta.data.storage import ContentAddressedStorage, StorageManifest, StoredBar
-from aarta.data.dataset import Dataset, DatasetBuilder, DatasetInspector, DatasetManifest
 from aarta.domain.models import Bar, Instrument
-
 
 # =============================================================================
 # Fixtures
@@ -42,7 +42,7 @@ def sample_instrument() -> Instrument:
 @pytest.fixture
 def sample_bars(sample_instrument: Instrument) -> list[Bar]:
     """Create a list of sample bars for testing."""
-    base_time = datetime(2024, 1, 15, 9, 15, 0, tzinfo=timezone.utc)
+    base_time = datetime(2024, 1, 15, 9, 15, 0, tzinfo=UTC)
     bars = []
     for i in range(5):
         ts = base_time.replace(minute=15 + i * 5)
@@ -83,6 +83,10 @@ class TestIngestionResult:
             duplicates_detected=2,
             conflicts_detected=1,
             invalid_bars=0,
+            content_hashes=[
+                "hash1",
+                "hash2",
+            ],  # Provide hashes to generate manifest_hash
         )
         assert result.bars_ingested == 10
         assert result.duplicates_detected == 2
@@ -106,7 +110,9 @@ class TestIngestionResult:
         ingestor = DataIngestor()
         result = ingestor.ingest_bars(sample_bars)
 
-        with pytest.raises(Exception):  # frozen dataclass raises AttributeError or FrozenInstanceError
+        with pytest.raises(
+            Exception
+        ):  # frozen dataclass raises AttributeError or FrozenInstanceError
             result.bars_ingested = 999  # type: ignore[misc]
 
 
@@ -182,15 +188,15 @@ class TestDataIngestor:
         """Test detection of invalid bars (low > high)."""
         ingestor = DataIngestor()
 
-        invalid_bar = Bar(
-            instrument_id=sample_instrument.symbol,
-            timestamp=datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc).isoformat(),
-            open=Decimal("220.00"),
-            high=Decimal("219.00"),  # High < Low - invalid
-            low=Decimal("221.00"),
-            close=Decimal("220.50"),
-            volume=1000,
-        )
+        # Bypass Bar's __post_init__ validation to create an invalid bar for testing
+        invalid_bar = object.__new__(Bar)
+        invalid_bar.instrument_id = sample_instrument.symbol
+        invalid_bar.timestamp = datetime(2024, 1, 15, 10, 0, tzinfo=UTC).isoformat()
+        invalid_bar.open = Decimal("220.00")
+        invalid_bar.high = Decimal("219.00")  # High < Low - invalid
+        invalid_bar.low = Decimal("221.00")
+        invalid_bar.close = Decimal("220.50")
+        invalid_bar.volume = 1000
 
         result = ingestor.ingest_bars([invalid_bar])
         assert result.bars_ingested == 0
@@ -249,31 +255,35 @@ class TestBarValidator:
     def test_low_greater_than_high(self, sample_instrument: Instrument) -> None:
         """Test detection of low > high error."""
         validator = BarValidator()
-        bar = Bar(
-            instrument_id=sample_instrument.symbol,
-            timestamp=datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc).isoformat(),
-            open=Decimal("220.00"),
-            high=Decimal("219.00"),
-            low=Decimal("221.00"),
-            close=Decimal("220.50"),
-            volume=1000,
-        )
+
+        # Bypass Bar's __post_init__ validation to create an invalid bar for testing
+        bar = object.__new__(Bar)
+        bar.instrument_id = sample_instrument.symbol
+        bar.timestamp = datetime(2024, 1, 15, 10, 0, tzinfo=UTC).isoformat()
+        bar.open = Decimal("220.00")
+        bar.high = Decimal("219.00")
+        bar.low = Decimal("221.00")
+        bar.close = Decimal("220.50")
+        bar.volume = 1000
 
         errors = validator.validate_bar(bar)
-        assert any(e.error_type == ValidationErrorType.LOW_GREATER_THAN_HIGH for e in errors)
+        assert any(
+            e.error_type == ValidationErrorType.LOW_GREATER_THAN_HIGH for e in errors
+        )
 
     def test_open_below_low(self, sample_instrument: Instrument) -> None:
         """Test detection of open < low error."""
         validator = BarValidator()
-        bar = Bar(
-            instrument_id=sample_instrument.symbol,
-            timestamp=datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc).isoformat(),
-            open=Decimal("218.00"),  # Below low
-            high=Decimal("221.00"),
-            low=Decimal("219.00"),
-            close=Decimal("220.50"),
-            volume=1000,
-        )
+
+        # Bypass Bar's __post_init__ validation to create an invalid bar for testing
+        bar = object.__new__(Bar)
+        bar.instrument_id = sample_instrument.symbol
+        bar.timestamp = datetime(2024, 1, 15, 10, 0, tzinfo=UTC).isoformat()
+        bar.open = Decimal("218.00")  # Below low
+        bar.high = Decimal("221.00")
+        bar.low = Decimal("219.00")
+        bar.close = Decimal("220.50")
+        bar.volume = 1000
 
         errors = validator.validate_bar(bar)
         assert any(e.error_type == ValidationErrorType.OPEN_BELOW_LOW for e in errors)
@@ -281,15 +291,16 @@ class TestBarValidator:
     def test_close_above_high(self, sample_instrument: Instrument) -> None:
         """Test detection of close > high error."""
         validator = BarValidator()
-        bar = Bar(
-            instrument_id=sample_instrument.symbol,
-            timestamp=datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc).isoformat(),
-            open=Decimal("220.00"),
-            high=Decimal("221.00"),
-            low=Decimal("219.00"),
-            close=Decimal("222.00"),  # Above high
-            volume=1000,
-        )
+
+        # Bypass Bar's __post_init__ validation to create an invalid bar for testing
+        bar = object.__new__(Bar)
+        bar.instrument_id = sample_instrument.symbol
+        bar.timestamp = datetime(2024, 1, 15, 10, 0, tzinfo=UTC).isoformat()
+        bar.open = Decimal("220.00")
+        bar.high = Decimal("221.00")
+        bar.low = Decimal("219.00")
+        bar.close = Decimal("222.00")  # Above high
+        bar.volume = 1000
 
         errors = validator.validate_bar(bar)
         assert any(e.error_type == ValidationErrorType.CLOSE_ABOVE_HIGH for e in errors)
@@ -297,15 +308,16 @@ class TestBarValidator:
     def test_negative_price(self, sample_instrument: Instrument) -> None:
         """Test detection of negative prices."""
         validator = BarValidator()
-        bar = Bar(
-            instrument_id=sample_instrument.symbol,
-            timestamp=datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc).isoformat(),
-            open=Decimal("-220.00"),
-            high=Decimal("221.00"),
-            low=Decimal("219.00"),
-            close=Decimal("220.50"),
-            volume=1000,
-        )
+
+        # Bypass Bar's __post_init__ validation to create an invalid bar for testing
+        bar = object.__new__(Bar)
+        bar.instrument_id = sample_instrument.symbol
+        bar.timestamp = datetime(2024, 1, 15, 10, 0, tzinfo=UTC).isoformat()
+        bar.open = Decimal("-220.00")
+        bar.high = Decimal("221.00")
+        bar.low = Decimal("219.00")
+        bar.close = Decimal("220.50")
+        bar.volume = 1000
 
         errors = validator.validate_bar(bar)
         assert any(e.error_type == ValidationErrorType.NEGATIVE_PRICE for e in errors)
@@ -313,15 +325,16 @@ class TestBarValidator:
     def test_negative_volume(self, sample_instrument: Instrument) -> None:
         """Test detection of negative volume."""
         validator = BarValidator()
-        bar = Bar(
-            instrument_id=sample_instrument.symbol,
-            timestamp=datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc).isoformat(),
-            open=Decimal("220.00"),
-            high=Decimal("221.00"),
-            low=Decimal("219.00"),
-            close=Decimal("220.50"),
-            volume=-1000,
-        )
+
+        # Bypass Bar's __post_init__ validation to create an invalid bar for testing
+        bar = object.__new__(Bar)
+        bar.instrument_id = sample_instrument.symbol
+        bar.timestamp = datetime(2024, 1, 15, 10, 0, tzinfo=UTC).isoformat()
+        bar.open = Decimal("220.00")
+        bar.high = Decimal("221.00")
+        bar.low = Decimal("219.00")
+        bar.close = Decimal("220.50")
+        bar.volume = -1000
 
         errors = validator.validate_bar(bar)
         assert any(e.error_type == ValidationErrorType.NEGATIVE_VOLUME for e in errors)
@@ -342,7 +355,7 @@ class TestBarValidator:
 
         valid_bar = Bar(
             instrument_id=sample_instrument.symbol,
-            timestamp=datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc).isoformat(),
+            timestamp=datetime(2024, 1, 15, 10, 0, tzinfo=UTC).isoformat(),
             open=Decimal("220.00"),
             high=Decimal("221.00"),
             low=Decimal("219.00"),
@@ -350,15 +363,15 @@ class TestBarValidator:
             volume=1000,
         )
 
-        invalid_bar = Bar(
-            instrument_id=sample_instrument.symbol,
-            timestamp=datetime(2024, 1, 15, 10, 5, tzinfo=timezone.utc).isoformat(),
-            open=Decimal("220.00"),
-            high=Decimal("219.00"),  # Invalid
-            low=Decimal("221.00"),
-            close=Decimal("220.50"),
-            volume=1000,
-        )
+        # Bypass Bar's __post_init__ validation to create an invalid bar for testing
+        invalid_bar = object.__new__(Bar)
+        invalid_bar.instrument_id = sample_instrument.symbol
+        invalid_bar.timestamp = datetime(2024, 1, 15, 10, 5, tzinfo=UTC).isoformat()
+        invalid_bar.open = Decimal("220.00")
+        invalid_bar.high = Decimal("219.00")  # Invalid
+        invalid_bar.low = Decimal("221.00")
+        invalid_bar.close = Decimal("220.50")
+        invalid_bar.volume = 1000
 
         result = validator.validate_bars([valid_bar, invalid_bar])
         assert result.total_bars == 2
@@ -379,7 +392,7 @@ class TestBarValidator:
         bars = [
             Bar(
                 instrument_id=sample_instrument.symbol,
-                timestamp=datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc).isoformat(),
+                timestamp=datetime(2024, 1, 15, 10, 0, tzinfo=UTC).isoformat(),
                 open=Decimal("220.00"),
                 high=Decimal("221.00"),
                 low=Decimal("219.00"),
@@ -388,7 +401,9 @@ class TestBarValidator:
             ),
             Bar(
                 instrument_id=sample_instrument.symbol,
-                timestamp=datetime(2024, 1, 15, 9, 0, tzinfo=timezone.utc).isoformat(),  # Earlier!
+                timestamp=datetime(
+                    2024, 1, 15, 9, 0, tzinfo=UTC
+                ).isoformat(),  # Earlier!
                 open=Decimal("219.00"),
                 high=Decimal("220.00"),
                 low=Decimal("218.00"),
@@ -434,7 +449,9 @@ class TestContentAddressedStorage:
         assert retrieved is not None
         assert retrieved.bar.open == sample_bars[0].open
 
-    def test_deduplication(self, temp_storage_dir: Path, sample_bars: list[Bar]) -> None:
+    def test_deduplication(
+        self, temp_storage_dir: Path, sample_bars: list[Bar]
+    ) -> None:
         """Test that duplicate bars are deduplicated."""
         storage = ContentAddressedStorage(temp_storage_dir / "storage")
         storage.initialize()
@@ -461,9 +478,13 @@ class TestContentAddressedStorage:
         for i in range(len(retrieved) - 1):
             assert retrieved[i].timestamp <= retrieved[i + 1].timestamp
 
-    def test_manifest_generation(self, temp_storage_dir: Path, sample_bars: list[Bar]) -> None:
+    def test_manifest_generation(
+        self, temp_storage_dir: Path, sample_bars: list[Bar]
+    ) -> None:
         """Test manifest generation."""
-        storage = ContentAddressedStorage(temp_storage_dir / "storage", storage_id="test123")
+        storage = ContentAddressedStorage(
+            temp_storage_dir / "storage", storage_id="test123"
+        )
         storage.initialize()
         storage.store_bars(sample_bars)
         storage.save_manifest()
@@ -484,7 +505,9 @@ class TestContentAddressedStorage:
 
         assert storage.verify_integrity(stored.content_hash)
 
-    def test_atomic_write_rollback(self, temp_storage_dir: Path, sample_bars: list[Bar]) -> None:
+    def test_atomic_write_rollback(
+        self, temp_storage_dir: Path, sample_bars: list[Bar]
+    ) -> None:
         """Test that failed writes don't leave partial files."""
         storage = ContentAddressedStorage(temp_storage_dir / "storage")
         storage.initialize()
@@ -520,7 +543,7 @@ class TestDatasetManifest:
             bar_count=5,
             content_hashes=["hash1", "hash2"],
             storage_manifest=storage_manifest,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
         )
 
         assert manifest.dataset_hash != ""
@@ -530,12 +553,16 @@ class TestDatasetManifest:
 class TestDatasetBuilder:
     """Tests for DatasetBuilder."""
 
-    def test_build_dataset(self, temp_storage_dir: Path, sample_bars: list[Bar]) -> None:
+    def test_build_dataset(
+        self, temp_storage_dir: Path, sample_bars: list[Bar]
+    ) -> None:
         """Test building a complete dataset."""
         storage = ContentAddressedStorage(temp_storage_dir / "storage")
         storage.initialize()
 
-        builder = DatasetBuilder(name="TestDataset", description="Test dataset for NIFTY")
+        builder = DatasetBuilder(
+            name="TestDataset", description="Test dataset for NIFTY"
+        )
         builder.add_bars(sample_bars)
 
         dataset = builder.build(storage)
@@ -691,7 +718,7 @@ class TestFullIngestionPipeline:
         storage.initialize()
 
         # Create bars for two instruments
-        base_time = datetime(2024, 1, 15, 9, 15, tzinfo=timezone.utc)
+        base_time = datetime(2024, 1, 15, 9, 15, tzinfo=UTC)
         all_bars: list[Bar] = []
 
         for inst_id in ["NIFTYBEES", "BANKBEES"]:
@@ -713,7 +740,9 @@ class TestFullIngestionPipeline:
         validator = BarValidator()
         assert validator.validate_bars(all_bars).is_valid
 
-        builder = DatasetBuilder(name="MultiInstrument", description="Multiple instruments")
+        builder = DatasetBuilder(
+            name="MultiInstrument", description="Multiple instruments"
+        )
         builder.add_bars(all_bars)
         dataset = builder.build(storage)
 
