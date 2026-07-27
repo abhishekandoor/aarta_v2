@@ -1,0 +1,26 @@
+```
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.coverage
+coverage/
+htmlcov/
+
+# Testing
+.pytest_cache/
+.tox/
+.nox/
+
+# Distribution / packaging
+.Python
+env/
+venv/
+ENV/
+.venv/
+env.bak/
+venv.bak/
+```

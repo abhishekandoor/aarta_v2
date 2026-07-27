@@ -1,0 +1,25 @@
+[project]
+name = "aarta"
+version = "0.1.0"
+description = "Autonomous Adaptive Research and Trading Agent - Intraday trading research and paper-trading system"
+readme = "README.md"
+authors = [
+    { name = "AARTA Team", email = "aarta@example.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.5.0",
+]
+
+[project.scripts]
+aarta = "aarta.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.32,<0.12.0"]
+build-backend = "uv_build"
