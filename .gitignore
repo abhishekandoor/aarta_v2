@@ -1,1 +1,26 @@
-Nothing should be ignored since only source code files (.py) were modified and no build artifacts, dependencies, or temporary files are present in the changes.
+```
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.coverage
+coverage/
+htmlcov/
+
+# Testing
+.pytest_cache/
+.tox/
+.nox/
+
+# Distribution / packaging
+.Python
+env/
+venv/
+ENV/
+.venv/
+env.bak/
+venv.bak/
+```
